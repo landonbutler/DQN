@@ -364,6 +364,79 @@ def train(params, model):
     np.savetxt('{}_val_acc.txt'.format(params.mode), np.asarray(trainValHistCb.val_acc))
 
 
+
+    # layers = ['quaternion_conv2d','quaternion_conv2d_2','flatten','dense']
+    layers = ['quaternion_conv2d','dense']
+    layer_outputs = []
+
+    for layer in layers:
+        intermediate_layer_model = Model(inputs=model.input,
+                                        outputs=model.get_layer(layer).output)
+        layer_outputs.append(intermediate_layer_model.predict(X_test))
+
+    origWeights = np.copy(model.get_layer('quaternion_conv2d').get_weights()[0])
+    origBias = np.copy(model.get_layer('quaternion_conv2d').get_weights()[1])
+    alphas = [0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5]
+    outputFilename = 'stabilityClassificationResults.txt'
+    num_perturb = 10
+    with open(outputFilename, "w") as of:
+        for alpha in alphas:
+
+            loss = np.zeros(num_perturb)
+            acc = np.zeros(num_perturb)
+            firstConvNorm = np.zeros(num_perturb)
+            lastConvNorm = np.zeros(num_perturb)
+            flattenNorm = np.zeros(num_perturb)
+            outputNorm = np.zeros(num_perturb)
+
+            for i in range(num_perturb):
+                print(i)
+                # perturbedWeights
+                perturbedWeights = np.copy(origWeights)
+                perturbedWeights[:,:,:,:24] += tf.random.uniform(perturbedWeights[:,:,:,:24].shape, minval=-alpha, maxval=alpha, seed=i)
+                model.get_layer('quaternion_conv2d').set_weights([perturbedWeights, origBias])
+                l, a = model.evaluate(x = X_test, y = y_test, verbose=0, batch_size=32)
+                perturbed_layer_outputs = []
+                for layer in layers:
+                    perturbed_layer_model = Model(inputs=model.input,
+                                            outputs=model.get_layer(layer).output)
+                    perturbed_layer_outputs.append(perturbed_layer_model.predict(X_test))
+
+
+                loss[i] = l
+                acc[i] = a
+                firstConvNorm[i] = LA.norm(layer_outputs[0] - perturbed_layer_outputs[0])
+                #lastConvNorm[i] = LA.norm(layer_outputs[1] - perturbed_layer_outputs[1])
+                #flattenNorm[i] = LA.norm(layer_outputs[2] - perturbed_layer_outputs[2])
+                outputNorm[i] = LA.norm(layer_outputs[1] - perturbed_layer_outputs[1])
+            
+            print(alpha)
+            of.write(str(alpha) + '\n')
+
+            lossStr = f'Loss: {np.mean(loss), np.std(loss)}\n'
+            print(lossStr)
+            of.write(lossStr)
+
+            accStr = f'Acc: {np.mean(acc), np.std(acc)}\n'
+            print(accStr)
+            of.write(accStr)
+
+            fConvNormStr = f'FirstConvNorm: {np.mean(firstConvNorm), np.std(firstConvNorm)}\n'
+            print(fConvNormStr)
+            of.write(fConvNormStr)
+
+            oNormStr = f'OutputNorm: {np.mean(outputNorm), np.std(outputNorm)}\n'
+            print(oNormStr)
+            of.write(oNormStr)
+            
+            # print(f'LastConvNorm: {np.mean(lastConvNorm), np.std(lastConvNorm)}')
+            # print(f'FlattenNorm: {np.mean(flattenNorm), np.std(flattenNorm)}')
+            print()
+            of.write('\n')
+    
+    return model
+
+
 if __name__ == '__main__':
     param_dict = {"mode": "quaternion",
                   "num_blocks": 10,
@@ -382,4 +455,4 @@ if __name__ == '__main__':
     
     params = Params(param_dict)
     model = getModel(params)
-    train(params, model)
+    model = train(params, model)
